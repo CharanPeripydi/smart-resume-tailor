@@ -1,7 +1,3 @@
-openai
 streamlit
-python-docx
-python-dotenv
-streamlit
-python-docx
 openai
+python-docx

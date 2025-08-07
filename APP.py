@@ -1,145 +1,163 @@
 import streamlit as st
-from docx import Document
-from docx.shared import Pt, RGBColor
-from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
 from openai import OpenAI
-import os
-from dotenv import load_dotenv
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
-from docx.oxml.ns import qn
+import docx
+import re
+from io import BytesIO
+from docx.shared import RGBColor, Pt
+import time
 
-# Load API key
-load_dotenv()
-client = OpenAI()
+# Set OpenAI API key
+client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
-# Page config and style
 st.set_page_config(page_title="Smart Resume Tailor", layout="wide")
-
 st.markdown("""
     <style>
-        .main {
-            background-color: #f8f9fa;
-            padding: 20px;
-            font-family: 'Segoe UI', sans-serif;
-        }
-        .stTextArea label, .stButton button {
-            font-weight: bold;
-        }
-        .css-1aumxhk {
-            background-color: #0072C6;
-            color: white;
-            border-radius: 5px;
-        }
+    body, .main, .block-container {
+        background-color: #000000 !important;
+        color: #FFFFFF !important;
+        overflow-x: hidden;
+    }
+    .stButton>button {
+        background-color: #1DB954 !important;
+        color: white !important;
+        font-weight: bold;
+    }
+    .stTextInput>div>input, .stTextArea textarea {
+        background-color: #121212 !important;
+        color: white !important;
+    }
+    .stFileUploader {
+        background-color: #121212 !important;
+        color: white !important;
+        padding: 1rem;
+        border-radius: 8px;
+    }
+    label {
+        color: #FFFFFF !important;
+        font-weight: 600;
+        font-size: 16px;
+    }
+    .stTextArea, .stTextInput {
+        background-color: #121212 !important;
+    }
+    .stDownloadButton>button {
+        background-color: #1DB954 !important;
+        color: white !important;
+        font-weight: bold;
+        border-radius: 8px;
+        padding: 0.5rem 1.2rem;
+    }
+    .ats-score {
+        font-size: 22px;
+        color: #1DB954;
+        padding-top: 10px;
+    }
     </style>
 """, unsafe_allow_html=True)
 
-st.title("🧠 Smart Resume Tailor – AI Rewriter & Word Exporter")
-st.markdown("Tailor your resume to any job description. Get ATS-optimized formatting, exact role preservation, and a clean downloadable Word file.")
+st.title("🚀 Smart Resume Tailor – Boost Your ATS Score")
 
-# Text inputs
-resume_text = st.text_area("📄 Paste Your Resume", height=300, placeholder="Paste your raw resume...")
-jd_text = st.text_area("📝 Paste Job Description", height=300, placeholder="Paste the job description here...")
+col1, col2 = st.columns([1, 1], gap="large")
 
-# ATS score function
-def get_ats_score(resume, jd):
-    vectorizer = TfidfVectorizer()
-    tfidf = vectorizer.fit_transform([resume, jd])
-    score = cosine_similarity(tfidf[0:1], tfidf[1:2])[0][0]
-    return round(score * 100, 2)
+with col1:
+    st.markdown("#### 📄 Upload your resume (.docx only)")
+    uploaded_resume = st.file_uploader("", type=["docx"])
 
-# Button
-if st.button("✍️ Tailor Resume"):
-    if resume_text and jd_text:
-        with st.spinner("Tailoring your resume… optimizing keywords, formatting for ATS, and preparing download... 💼"):
-            # AI Prompt
+with col2:
+    st.markdown("#### 🧾 Paste the Job Description Here")
+    jd_text = st.text_area("", height=300)
+
+if st.button("🎯 Tailor My Resume"):
+    if uploaded_resume and jd_text:
+        with st.spinner('✨ Tailoring your resume...'):
+            time.sleep(1)
+            doc = docx.Document(uploaded_resume)
+            full_text = "\n".join([para.text for para in doc.paragraphs])
+
             prompt = f"""
-You are an expert resume writer. Do NOT change the job role titles in the Experience section — keep them exactly as written.
-However, you may improve or rewrite the bullet points beneath each title based on the job description.
+            You are an ATS optimization assistant. Based on the job description below, tailor the PROFESSIONAL SUMMARY, EXPERIENCE BULLET POINTS (minimum 10 per job), and PROJECTS SECTION (minimum 10 projects).
 
-Write exactly 10 bullet points under each job. Make sure the resume is tightly formatted to fit within 2 pages.
-Maintain original section order and use professional, clean formatting with no extra spacing.
+            INSTRUCTIONS:
+            1. DO NOT change role titles or section headers.
+            2. DO NOT use any emojis.
+            3. Retain the original layout: gaps, separators ("―" lines), bullet spacing, and structure.
+            4. HEADINGS like "PROFESSIONAL SUMMARY", "PROJECTS", "SKILLS", "EXPERIENCE" should be bold and blue.
+            5. Role titles (e.g., Data Analyst), company names (e.g., Noesys Inc.), dates, and virtual program names should be bold (not blue).
+            6. At the end, add keyword stuffing in white color, font size 1.
+            7. Finish with: ATS SCORE: [number between 0 and 100]
 
-Keep content ATS-friendly and relevant to the job description.
+            JOB DESCRIPTION:
+            {jd_text}
 
-Resume:
-{resume_text}
+            ORIGINAL RESUME:
+            {full_text}
+            """
 
-Job Description:
-{jd_text}
-"""
-
-            # OpenAI API Call
             response = client.chat.completions.create(
                 model="gpt-4",
-                messages=[{"role": "user", "content": prompt}],
+                messages=[
+                    {"role": "system", "content": "You are a helpful ATS resume optimizer."},
+                    {"role": "user", "content": prompt}
+                ],
                 temperature=0.7
             )
 
-            optimized_resume = response.choices[0].message.content
-            score = get_ats_score(optimized_resume, jd_text)
+            tailored_text = response.choices[0].message.content
 
-            # Display Result
-            st.success("✅ Resume tailored successfully!")
-            st.text_area("🧾 Tailored Resume Output", optimized_resume, height=400)
-            st.metric(label="📊 ATS Match Score", value=f"{score}%")
+            ats_score_match = re.search(r"(?i)ATS SCORE[:\s]+(\d{1,3})", tailored_text)
+            ats_score = ats_score_match.group(1) if ats_score_match else "N/A"
+            tailored_text_clean = re.sub(r"(?i)ATS SCORE[:\s]+(\d{1,3})", "", tailored_text).strip()
 
-            # Word Export
-            doc = Document()
-            style = doc.styles['Normal']
+            output = BytesIO()
+            new_doc = docx.Document()
+            style = new_doc.styles['Normal']
             font = style.font
             font.name = 'Calibri'
             font.size = Pt(10.5)
 
-            # Format: Blue Headers + Line
-            def add_header(text):
-                para = doc.add_paragraph()
-                run = para.add_run(text.upper())
-                run.bold = True
-                run.font.size = Pt(11.5)
-                run.font.color.rgb = RGBColor(0, 102, 204)
-                para.paragraph_format.space_after = Pt(0)
-                para.alignment = WD_PARAGRAPH_ALIGNMENT.LEFT
+            blue_headings = ["PROFESSIONAL SUMMARY", "SKILLS", "EXPERIENCE", "PROJECTS", "EDUCATION", "VIRTUAL EXPERIENCE PROGRAMS"]
 
-                # Separator Line
-                line_para = doc.add_paragraph()
-                run_line = line_para.add_run("─" * 100)
-                run_line.font.size = Pt(5)
-                run_line.font.color.rgb = RGBColor(160, 160, 160)
-                line_para.paragraph_format.space_after = Pt(4)
-
-            for line in optimized_resume.split("\n"):
-                line = line.strip()
-                if not line:
+            for line in tailored_text_clean.splitlines():
+                if line.strip() == "":
                     continue
 
-                # Remove "Resume" header at top if present
-                if line.lower().startswith("resume"):
-                    continue
+                para = new_doc.add_paragraph()
+                run = para.add_run(line.strip())
+                run.font.name = 'Calibri'
+                run.font.size = Pt(10.5)
 
-                # Blue section headers
-                if line.isupper() or "__________" in line:
-                    add_header(line.replace("_", "").strip())
+                if line.strip().startswith("-") or line.strip().startswith("•"):
+                    para = new_doc.add_paragraph(style='List Bullet')
+                    run = para.add_run(line.strip("-• "))
+                    run.font.name = 'Calibri'
+                    run.font.size = Pt(10.5)
 
-                # Bullet points
-                elif line.startswith("•") or line.startswith("-"):
-                    para = doc.add_paragraph(line[1:].strip(), style='List Bullet')
-                    para.paragraph_format.space_after = Pt(1)
+                elif line.strip() in blue_headings:
+                    run.bold = True
+                    run.font.color.rgb = RGBColor(0, 112, 192)  # Blue
 
-                # Normal text
-                else:
-                    para = doc.add_paragraph(line)
-                    para.paragraph_format.space_after = Pt(1)
+                elif ("Inc." in line or "LLC" in line or "Analyst" in line or "Intern" in line or "Assistant" in line or re.search(r"\b\d{4}\b", line)):
+                    run.bold = True
 
-            doc.save("Tailored_Resume.docx")
+                elif "―" in line:
+                    run = para.add_run("―" * 100)
+                    run.font.name = 'Calibri'
+                    run.font.size = Pt(10.5)
 
-            # Download button
-            with open("Tailored_Resume.docx", "rb") as file:
-                st.download_button(
-                    label="📥 Download Tailored Resume (.docx)",
-                    data=file,
-                    file_name="Tailored_Resume.docx",
-                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                )
+            # Add invisible keyword stuffing at the end
+            stuffing_para = new_doc.add_paragraph()
+            stuffing_run = stuffing_para.add_run(" ".join(re.findall(r"\b\w+\b", jd_text.lower())))
+            stuffing_run.font.color.rgb = RGBColor(255, 255, 255)
+            stuffing_run.font.size = Pt(1)
+
+            new_doc.save(output)
+            st.success("✅ Resume tailored successfully!")
+            st.markdown(f"<div class='ats-score'>📈 Estimated ATS Score: <strong>{ats_score}</strong></div>", unsafe_allow_html=True)
+            st.download_button(
+                label="📥 Download Tailored Resume",
+                data=output.getvalue(),
+                file_name="Tailored_Resume.docx",
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            )
     else:
-        st.warning("⚠️ Please paste both your resume and job description.")
+        st.error("❌ Please upload a resume and paste the job description.")
